@@ -24,6 +24,7 @@ uv run streamlit run app.py     # opens at http://localhost:8501
 | Tab | What it shows |
 | --- | --- |
 | Story | The "what happened" view — altitude, airspeed, pitch, roll over the full ~13-minute window with the upset onset marked |
+| 3D Replay | Interactive 3D animation of the final seconds. The aircraft glyph rotates in real time using pitch / roll / heading; trajectory ribbon is colour-coded by altitude. Drag the slider or hit ▶ Play to scrub. |
 | Event zoom | Last 30 s at full 16 Hz, plus derived vertical speed |
 | Engines | N1, fuel flow, EGT, TRA for both engines |
 | Flight controls | Elevator / aileron / rudder positions vs. column / wheel / pedal inputs |

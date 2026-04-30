@@ -345,6 +345,270 @@ def trajectory_xy(df: pd.DataFrame) -> go.Figure:
 
 
 # ---------------------------------------------------------------------------
+# 3D replay
+# ---------------------------------------------------------------------------
+def _body_axes(heading_deg: float, pitch_deg: float, roll_deg: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return (nose, right_wing, body_up) unit vectors in world frame.
+
+    World frame: x = east, y = north, z = up.
+    Conventions:
+      - heading: 0 = north, clockwise positive (standard compass)
+      - pitch: positive = nose up
+      - roll: positive = right wing down
+    """
+    H = np.deg2rad(heading_deg)
+    P = np.deg2rad(pitch_deg)
+    R = np.deg2rad(roll_deg)
+    sH, cH = np.sin(H), np.cos(H)
+    sP, cP = np.sin(P), np.cos(P)
+    sR, cR = np.sin(R), np.cos(R)
+
+    # Nose direction: compass-style azimuth + elevation by pitch
+    nose = np.array([sH * cP, cH * cP, sP])
+    # "pre-roll" body up: body up before any rolling (after yaw + pitch)
+    pre_up = np.array([-sH * sP, -cH * sP, cP])
+    # Right wing before roll: nose x pre_up (right-handed)
+    pre_right = np.cross(nose, pre_up)
+
+    # Apply roll about the nose axis
+    right_wing = cR * pre_right - sR * pre_up
+    body_up = cR * pre_up + sR * pre_right
+    return nose, right_wing, body_up
+
+
+def _aircraft_lines(
+    pos: np.ndarray,
+    heading_deg: float,
+    pitch_deg: float,
+    roll_deg: float,
+    scale: float = 0.05,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return (xs, ys, zs) for a Scatter3d line trace shaping a stylised aircraft.
+
+    The aircraft is drawn as four line segments (fuselage / wings / vertical tail
+    / horizontal stab). Segments are separated by NaN so a single Scatter3d trace
+    renders all four as disjoint lines.
+    """
+    nose, right_wing, body_up = _body_axes(heading_deg, pitch_deg, roll_deg)
+
+    def w(a: float, b: float, c: float) -> np.ndarray:
+        return pos + scale * (a * nose + b * right_wing + c * body_up)
+
+    # Body-frame coordinates (a along nose, b along right wing, c along up)
+    fuse_back, fuse_front = -3.0, 5.0
+    wing = 4.0
+    vtail_h = 1.5
+    hstab = 1.5
+
+    pts: list[np.ndarray] = []
+    nan = np.array([np.nan, np.nan, np.nan])
+    # Fuselage
+    pts.extend([w(fuse_back, 0, 0), w(fuse_front, 0, 0), nan])
+    # Wings
+    pts.extend([w(0, -wing, 0), w(0, wing, 0), nan])
+    # Vertical tail (rises from rear of fuselage)
+    pts.extend([w(fuse_back + 0.2, 0, 0), w(fuse_back, 0, vtail_h), nan])
+    # Horizontal stabiliser
+    pts.extend([w(fuse_back, -hstab, 0), w(fuse_back, hstab, 0), nan])
+
+    arr = np.array(pts, dtype=float)
+    return arr[:, 0], arr[:, 1], arr[:, 2]
+
+
+def _resample_for_replay(df: pd.DataFrame, t_window_s: float, hz: float) -> dict[str, np.ndarray]:
+    """Resample the relevant flight columns to a uniform `hz` grid over the
+    last `t_window_s` seconds of the recording.
+    """
+    cols = ["Altitude Press", "Airspeed Comp", "Ground Spd", "Heading", "Pitch Angle", "Roll Angle"]
+    end = float(df["Time"].max())
+    start = end - t_window_s
+    sub = df[df["Time"].between(start, end)].copy()
+    sub = sub.sort_values("Time").reset_index(drop=True)
+    # ffill / bfill so every needed column has a value at every original sample
+    for c in cols:
+        sub[c] = sub[c].ffill().bfill()
+    targets = np.arange(start, end + 1e-9, 1.0 / hz)
+    out: dict[str, np.ndarray] = {"t": targets}
+    src_t = sub["Time"].values
+    for c in cols:
+        out[c] = np.interp(targets, src_t, sub[c].values)
+    return out
+
+
+def replay_3d_chart(
+    df: pd.DataFrame,
+    t_window_s: float = 60.0,
+    hz: float = 5.0,
+    glyph_scale: float = 0.10,
+) -> go.Figure:
+    """Build a 3D replay figure with a trajectory ribbon, an animated aircraft
+    glyph, and a scrubbable time slider.
+
+    Spatial units: nautical miles (path integrated from heading × ground-speed,
+    altitude converted ft -> nm so axis aspect is meaningful).
+    """
+    r = _resample_for_replay(df, t_window_s, hz)
+    t = r["t"]
+    n = len(t)
+
+    # Integrate ground track in nautical miles
+    dt = np.diff(t, prepend=t[0])
+    rad = np.deg2rad(90.0 - r["Heading"])  # compass -> math angle
+    speed_nmps = r["Ground Spd"] / 3600.0
+    vx = speed_nmps * np.cos(rad)
+    vy = speed_nmps * np.sin(rad)
+    x = np.cumsum(vx * dt)
+    y = np.cumsum(vy * dt)
+    z = r["Altitude Press"] / 6076.12  # ft -> nm
+
+    # Trajectory ribbon (constant trace, index 0)
+    traj = go.Scatter3d(
+        x=x,
+        y=y,
+        z=z,
+        mode="lines",
+        line=dict(color=r["Altitude Press"], colorscale="Viridis", width=4, colorbar=dict(title="Alt (ft)")),
+        name="Path",
+        hoverinfo="skip",
+    )
+
+    # Aircraft glyph (animated, trace index 1)
+    init_xs, init_ys, init_zs = _aircraft_lines(
+        np.array([x[0], y[0], z[0]]),
+        r["Heading"][0],
+        r["Pitch Angle"][0],
+        r["Roll Angle"][0],
+        scale=glyph_scale,
+    )
+    aircraft = go.Scatter3d(
+        x=init_xs,
+        y=init_ys,
+        z=init_zs,
+        mode="lines",
+        line=dict(color="#d62728", width=8),
+        name="Aircraft",
+        hoverinfo="skip",
+    )
+
+    # Current-position dot (animated, trace index 2)
+    cur_marker = go.Scatter3d(
+        x=[x[0]],
+        y=[y[0]],
+        z=[z[0]],
+        mode="markers",
+        marker=dict(size=4, color="#d62728"),
+        name="Now",
+        hoverinfo="skip",
+    )
+
+    # Frames
+    frames: list[go.Frame] = []
+    end_time = float(df["Time"].max())
+    for i in range(n):
+        ax_x, ax_y, ax_z = _aircraft_lines(
+            np.array([x[i], y[i], z[i]]),
+            r["Heading"][i],
+            r["Pitch Angle"][i],
+            r["Roll Angle"][i],
+            scale=glyph_scale,
+        )
+        rel = t[i] - end_time  # seconds before impact (negative)
+        title = (
+            f"T-{abs(rel):05.2f}s &nbsp;|&nbsp; "
+            f"Alt {r['Altitude Press'][i]:>6,.0f} ft &nbsp;|&nbsp; "
+            f"AS {r['Airspeed Comp'][i]:>5.0f} kt &nbsp;|&nbsp; "
+            f"Pitch {r['Pitch Angle'][i]:>+6.1f}° &nbsp;|&nbsp; "
+            f"Roll {r['Roll Angle'][i]:>+7.1f}°"
+        )
+        frames.append(
+            go.Frame(
+                name=str(i),
+                data=[
+                    go.Scatter3d(x=ax_x, y=ax_y, z=ax_z),
+                    go.Scatter3d(x=[x[i]], y=[y[i]], z=[z[i]]),
+                ],
+                traces=[1, 2],
+                layout=go.Layout(title=dict(text=title)),
+            )
+        )
+
+    # Slider
+    slider_steps = []
+    for i in range(n):
+        rel = t[i] - end_time
+        slider_steps.append(
+            dict(
+                method="animate",
+                label=f"{rel:+.1f}s",
+                args=[[str(i)], dict(mode="immediate", frame=dict(duration=0, redraw=True), transition=dict(duration=0))],
+            )
+        )
+
+    initial_title = (
+        f"T-{abs(t[0]-end_time):05.2f}s &nbsp;|&nbsp; "
+        f"Alt {r['Altitude Press'][0]:>6,.0f} ft &nbsp;|&nbsp; "
+        f"AS {r['Airspeed Comp'][0]:>5.0f} kt &nbsp;|&nbsp; "
+        f"Pitch {r['Pitch Angle'][0]:>+6.1f}° &nbsp;|&nbsp; "
+        f"Roll {r['Roll Angle'][0]:>+7.1f}°"
+    )
+
+    fig = go.Figure(
+        data=[traj, aircraft, cur_marker],
+        frames=frames,
+    )
+    fig.update_layout(
+        title=dict(text=initial_title, x=0.02, xanchor="left", font=dict(family="monospace", size=14)),
+        height=720,
+        margin=dict(l=0, r=0, t=50, b=10),
+        scene=dict(
+            xaxis=dict(title="east (nm, rel)"),
+            yaxis=dict(title="north (nm, rel)"),
+            zaxis=dict(title="alt (nm)"),
+            aspectmode="data",
+            camera=dict(eye=dict(x=1.6, y=-1.4, z=0.9)),
+        ),
+        showlegend=False,
+        updatemenus=[
+            dict(
+                type="buttons",
+                showactive=False,
+                x=0.02,
+                y=-0.02,
+                xanchor="left",
+                yanchor="top",
+                pad=dict(t=10, r=10),
+                buttons=[
+                    dict(
+                        label="▶ Play",
+                        method="animate",
+                        args=[None, dict(frame=dict(duration=80, redraw=True), fromcurrent=True, transition=dict(duration=0))],
+                    ),
+                    dict(
+                        label="⏸ Pause",
+                        method="animate",
+                        args=[[None], dict(frame=dict(duration=0, redraw=False), mode="immediate", transition=dict(duration=0))],
+                    ),
+                ],
+            )
+        ],
+        sliders=[
+            dict(
+                active=0,
+                steps=slider_steps,
+                x=0.10,
+                y=-0.02,
+                len=0.85,
+                xanchor="left",
+                yanchor="top",
+                pad=dict(t=10, b=10),
+                currentvalue=dict(prefix="t = ", font=dict(family="monospace")),
+            )
+        ],
+    )
+    return fig
+
+
+# ---------------------------------------------------------------------------
 # UI
 # ---------------------------------------------------------------------------
 def main() -> None:
@@ -426,9 +690,20 @@ def main() -> None:
         )
 
     # ------------------------------- Tabs ---------------------------------
-    tab_story, tab_event, tab_engines, tab_controls, tab_discrete, tab_track, tab_browser, tab_compare = st.tabs(
+    (
+        tab_story,
+        tab_replay,
+        tab_event,
+        tab_engines,
+        tab_controls,
+        tab_discrete,
+        tab_track,
+        tab_browser,
+        tab_compare,
+    ) = st.tabs(
         [
             "Story",
+            "3D Replay",
             "Event zoom (last 30 s)",
             "Engines",
             "Flight controls",
@@ -459,6 +734,39 @@ def main() -> None:
             """
         )
         st.plotly_chart(overview_chart(df, upset_t), use_container_width=True)
+
+    # --------------------------- 3D Replay tab ----------------------------
+    with tab_replay:
+        st.markdown(
+            """
+            Drag the slider (or hit **▶ Play**) to scrub through the final
+            seconds. The red aircraft glyph rotates in real time using the FDR's
+            pitch / roll / heading channels — you can see it bank past inverted
+            and pitch nose-down through the dive. The trajectory ribbon is
+            colour-coded by altitude (yellow = cruise, dark = ground).
+
+            Path is integrated from heading × ground-speed (no GPS in the
+            readout), so absolute position is approximate but the *shape*
+            of the path is faithful.
+            """
+        )
+        c1, c2 = st.columns(2)
+        with c1:
+            window_s = st.slider("Replay window (last N seconds)", 30, 300, 60, step=15)
+        with c2:
+            hz_choice = st.select_slider(
+                "Frame rate",
+                options=[2, 3, 5, 8, 10],
+                value=5,
+                help="Higher = smoother, but slower to load. 5 Hz is usually plenty.",
+            )
+        with st.spinner("Building 3D replay..."):
+            fig = replay_3d_chart(df, t_window_s=float(window_s), hz=float(hz_choice))
+        st.plotly_chart(fig, use_container_width=True)
+        st.caption(
+            "Tip: drag the 3D scene to rotate. Scroll to zoom. Double-click to reset. "
+            "Pause and step the slider one frame at a time for the upset onset."
+        )
 
     # ------------------------- Event zoom tab -----------------------------
     with tab_event:
