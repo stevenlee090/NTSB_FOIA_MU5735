@@ -616,15 +616,14 @@ def main() -> None:
                 height=520,
                 margin=dict(l=60, r=160, t=30, b=30),
                 xaxis=dict(title="FDR time (s)", domain=[0.05, 0.78]),
-                yaxis=dict(title=chosen[0], titlefont=dict(color=colors[0]), tickfont=dict(color=colors[0])),
+                yaxis=dict(title=dict(text=chosen[0], font=dict(color=colors[0])), tickfont=dict(color=colors[0])),
                 hovermode="x unified",
                 legend=dict(orientation="h", y=-0.15),
             )
             for i, c in enumerate(chosen[1:], start=2):
                 key = f"yaxis{i}"
                 layout[key] = dict(
-                    title=c,
-                    titlefont=dict(color=colors[i - 1]),
+                    title=dict(text=c, font=dict(color=colors[i - 1])),
                     tickfont=dict(color=colors[i - 1]),
                     overlaying="y",
                     side="right" if i % 2 == 0 else "left",
