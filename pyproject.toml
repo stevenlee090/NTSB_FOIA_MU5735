@@ -1,0 +1,12 @@
+[project]
+name = "mu5735-fdr-dashboard"
+version = "0.1.0"
+description = "Interactive dashboard for exploring the NTSB FOIA MU5735 (China Eastern, B-1791) flight data recorder data"
+requires-python = ">=3.11"
+dependencies = [
+    "streamlit>=1.36",
+    "pandas>=2.2",
+    "numpy>=1.26",
+    "plotly>=5.22",
+    "pyarrow>=16.0",
+]
