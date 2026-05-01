@@ -8,9 +8,11 @@ This repository serves as an archive to maintain access to those materials.
 
 ## Interactive dashboard
 
-A Streamlit-based explorer for the FDR data ([TableResolution.csv](TableResolution.csv) and [ExactSample.csv](ExactSample.csv)) is included.
+**Live demo:** https://mu5735-fdr.streamlit.app
 
-**Run it:**
+A Streamlit-based explorer for the FDR data ([TableResolution.csv](TableResolution.csv) and [ExactSample.csv](ExactSample.csv)) is included. The hosted version above is the easiest way to look around; the steps below are for running it locally.
+
+**Run it locally:**
 
 ```bash
 uv run python preprocess.py     # one-time: builds cache/ Parquet + parameter metadata
