@@ -965,7 +965,7 @@ def main() -> None:
             the heuristic upset onset (first sustained roll > 15°).
             """
         )
-        st.plotly_chart(overview_chart(df, upset_t), use_container_width=True)
+        st.plotly_chart(overview_chart(df, upset_t), width="stretch")
 
     # ------------------------ "What happened?" tab ------------------------
     with tab_what:
@@ -994,11 +994,11 @@ def main() -> None:
             **Hover any dot for the underlying signal evidence.**
             """
         )
-        st.plotly_chart(forensic_timeline_chart(), use_container_width=True)
+        st.plotly_chart(forensic_timeline_chart(), width="stretch")
         st.markdown("##### Chronological detail")
         st.dataframe(
             forensic_event_table(),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             column_config={
                 "T (rel impact)": st.column_config.Column(width="small"),
@@ -1128,7 +1128,7 @@ def main() -> None:
         ]
         st.dataframe(
             pd.DataFrame(rows),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             column_config={
                 "Scenario": st.column_config.Column(width="medium"),
@@ -1191,7 +1191,7 @@ def main() -> None:
             )
         with st.spinner("Building 3D replay..."):
             fig = replay_3d_chart(df, t_window_s=float(window_s), hz=float(hz_choice))
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
         st.caption(
             "Tip: drag the 3D scene to rotate. Scroll to zoom. Double-click to reset. "
             "Pause and step the slider one frame at a time for the upset onset."
@@ -1208,7 +1208,7 @@ def main() -> None:
         )
         end = df["Time"].max()
         win = df[df["Time"] > end - 30].reset_index(drop=True)
-        st.plotly_chart(overview_chart(win, upset_t), use_container_width=True)
+        st.plotly_chart(overview_chart(win, upset_t), width="stretch")
 
         # Bonus: pitch + roll + vertical-speed-derived in one panel
         alt_s = _series(win, "Altitude Press")
@@ -1218,7 +1218,7 @@ def main() -> None:
         fig.add_scatter(x=win["Time"], y=_series(win, "Roll Angle"), name="Roll (deg)", row=1, col=1)
         fig.add_scatter(x=win["Time"], y=vs, name="VS (ft/min)", row=2, col=1, line=dict(color="purple"))
         fig.update_layout(height=520, hovermode="x unified", margin=dict(l=60, r=30, t=40, b=30))
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
     # -------------------------- Engines tab -------------------------------
     with tab_engines:
@@ -1234,7 +1234,7 @@ def main() -> None:
             "EGT (degC)": ["Eng1 EGT", "Eng2 EGT"],
             "Thrust resolver angle (deg)": ["Eng1 TRA", "Eng2 TRA"],
         }
-        st.plotly_chart(multi_panel_chart(df_filt, panels, upset_t), use_container_width=True)
+        st.plotly_chart(multi_panel_chart(df_filt, panels, upset_t), width="stretch")
 
     # --------------------- Flight controls tab ----------------------------
     with tab_controls:
@@ -1249,7 +1249,7 @@ def main() -> None:
             "Rudder (deg)": ["Rudder", "Rudder Ped Pos"],
             "Pilot inputs (deg)": ["Ctrl Col Pos-L", "Ctrl Whl Pos-L"],
         }
-        st.plotly_chart(multi_panel_chart(df_filt, panels, upset_t), use_container_width=True)
+        st.plotly_chart(multi_panel_chart(df_filt, panels, upset_t), width="stretch")
 
     # ------------------------ Discrete states tab -------------------------
     with tab_discrete:
@@ -1262,7 +1262,7 @@ def main() -> None:
         chosen = st.multiselect(
             "Discrete signals", options=avail, default=avail[: min(8, len(avail))]
         )
-        st.plotly_chart(discrete_chart(df_filt, chosen, meta), use_container_width=True)
+        st.plotly_chart(discrete_chart(df_filt, chosen, meta), width="stretch")
 
     # -------------------------- Ground track tab --------------------------
     with tab_track:
@@ -1275,7 +1275,7 @@ def main() -> None:
             during the upset.
             """
         )
-        st.plotly_chart(trajectory_xy(df_filt), use_container_width=True)
+        st.plotly_chart(trajectory_xy(df_filt), width="stretch")
 
     # ----------------------- Parameter browser tab ------------------------
     with tab_browser:
@@ -1304,7 +1304,7 @@ def main() -> None:
         if q:
             ql = q.lower()
             cat_df = cat_df[cat_df["Parameter"].str.lower().str.contains(ql)]
-        st.dataframe(cat_df, use_container_width=True, height=320)
+        st.dataframe(cat_df, width="stretch", height=320)
 
         choice = st.selectbox(
             "Plot a parameter",
@@ -1328,7 +1328,7 @@ def main() -> None:
                 yaxis_title=info.get("unit") or "",
                 hovermode="x unified",
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
     # ----------------------------- Compare tab ----------------------------
     with tab_compare:
@@ -1370,7 +1370,7 @@ def main() -> None:
             if upset_t is not None and t_range[0] <= upset_t <= t_range[1]:
                 fig.add_vline(x=upset_t, line=dict(color="red", width=1, dash="dot"))
             fig.update_layout(**layout)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
 
 if __name__ == "__main__":
