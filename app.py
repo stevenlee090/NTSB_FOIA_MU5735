@@ -746,67 +746,96 @@ _CAT_COLOR = {
 
 
 def forensic_timeline_chart() -> go.Figure:
-    """A horizontal timeline of the final ~20 seconds, annotated with each
-    state change. Categories are colour-coded.
+    """A swimlane timeline: each category occupies its own horizontal row, so
+    events that happen at the same instant stack visibly instead of overlapping.
+
+    There are no on-chart labels — labels go in the chronological table below
+    the chart, where they have room to be readable.
     """
+    # Lane order from top to bottom of the chart
+    lanes = ["Cockpit input", "Auto reaction", "Result", "Impact"]
+    y_for: dict[str, int] = {cat: (len(lanes) - 1 - i) for i, cat in enumerate(lanes)}
+
     fig = go.Figure()
-    # Background line representing the 20-second axis
-    fig.add_shape(
-        type="line",
-        x0=-20, x1=0.2,
-        y0=0, y1=0,
-        line=dict(color="#888", width=2),
-    )
-    for cat, color in _CAT_COLOR.items():
+
+    # Subtle horizontal guide for each lane
+    for cat in lanes:
+        fig.add_shape(
+            type="line",
+            x0=-20.5, x1=0.5,
+            y0=y_for[cat], y1=y_for[cat],
+            line=dict(color="#ddd", width=1),
+            layer="below",
+        )
+
+    # One scatter trace per category so the legend entries line up
+    for cat in lanes:
         events = [e for e in FORENSIC_EVENTS if e["category"] == cat]
         if not events:
             continue
         fig.add_scatter(
             x=[e["rel"] for e in events],
-            y=[0] * len(events),
+            y=[y_for[cat]] * len(events),
             mode="markers",
-            marker=dict(size=14, color=color, line=dict(color="white", width=1.5)),
+            marker=dict(
+                size=18,
+                color=_CAT_COLOR[cat],
+                line=dict(color="white", width=2),
+                symbol="circle",
+            ),
             name=cat,
             customdata=[[e["label"], e["detail"]] for e in events],
-            hovertemplate="<b>T%{x:+.2f}s</b><br>%{customdata[0]}<br><br>%{customdata[1]}<extra></extra>",
+            hovertemplate="<b>T%{x:+.2f}s — " + cat + "</b><br>%{customdata[0]}<br><br>%{customdata[1]}<extra></extra>",
         )
 
-    # Stagger labels above/below the line so they don't overlap
-    for i, e in enumerate(FORENSIC_EVENTS):
-        y_offset = 0.5 if i % 2 == 0 else -0.5
-        fig.add_annotation(
-            x=e["rel"],
-            y=y_offset,
-            text=f"<b>T{e['rel']:+.1f}s</b><br>{e['label']}",
-            showarrow=True,
-            arrowhead=2,
-            arrowsize=1,
-            arrowwidth=1,
-            arrowcolor="#666",
-            ax=0,
-            ay=-30 if y_offset > 0 else 30,
-            font=dict(size=10, color=_CAT_COLOR[e["category"]]),
-            align="center",
-            bgcolor="rgba(255,255,255,0.85)",
-            borderpad=2,
-        )
+    # Mark T-0 (impact) with a vertical line
+    fig.add_vline(
+        x=0,
+        line=dict(color="#000", width=1, dash="dot"),
+        annotation_text="impact",
+        annotation_position="top",
+    )
 
     fig.update_layout(
-        title="Final 20 seconds — annotated timeline (T-0 = impact)",
-        height=500,
-        margin=dict(l=20, r=20, t=60, b=40),
+        height=320,
+        margin=dict(l=10, r=10, t=30, b=50),
         xaxis=dict(
             title="Seconds relative to impact",
-            range=[-20.5, 0.5],
+            range=[-20.5, 1.0],
             tickmode="array",
             tickvals=list(range(-20, 1, 2)),
             zeroline=False,
+            showgrid=True,
+            gridcolor="#f0f0f0",
         ),
-        yaxis=dict(visible=False, range=[-1.5, 1.5]),
-        legend=dict(orientation="h", y=-0.05, x=0.5, xanchor="center"),
-        plot_bgcolor="rgba(245,245,245,0.5)",
+        yaxis=dict(
+            tickmode="array",
+            tickvals=[y_for[c] for c in lanes],
+            ticktext=lanes,
+            range=[-0.6, len(lanes) - 0.4],
+            showgrid=False,
+            zeroline=False,
+        ),
+        legend=dict(orientation="h", y=-0.18, x=0.5, xanchor="center"),
+        plot_bgcolor="white",
+        hoverlabel=dict(bgcolor="white", font_size=12),
     )
     return fig
+
+
+def forensic_event_table() -> pd.DataFrame:
+    """Build a chronological table of the forensic events for display."""
+    rows = []
+    for e in FORENSIC_EVENTS:
+        rows.append(
+            {
+                "T (rel impact)": f"T{e['rel']:+.2f} s",
+                "Category": e["category"],
+                "Event": e["label"],
+                "Underlying signal evidence": e["detail"],
+            }
+        )
+    return pd.DataFrame(rows)
 
 
 # ---------------------------------------------------------------------------
@@ -958,12 +987,26 @@ def main() -> None:
         st.markdown(
             """
             Reconstructed by stepping through the high-rate (16 Hz) FDR samples
-            in the final 20 seconds. Each marker is a real, timestamped state
-            change in the recorded data — hover for the underlying signal
-            evidence.
+            in the final 20 seconds. Each event is a real, timestamped state
+            change in the recorded data. Lanes group events by category — three
+            cockpit inputs (red, top), three autopilot/automation reactions
+            (orange), several aerodynamic results (blue), and impact (black).
+            **Hover any dot for the underlying signal evidence.**
             """
         )
         st.plotly_chart(forensic_timeline_chart(), use_container_width=True)
+        st.markdown("##### Chronological detail")
+        st.dataframe(
+            forensic_event_table(),
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "T (rel impact)": st.column_config.Column(width="small"),
+                "Category": st.column_config.Column(width="small"),
+                "Event": st.column_config.Column(width="medium"),
+                "Underlying signal evidence": st.column_config.Column(width="large"),
+            },
+        )
 
         st.subheader("The five anomalies")
         st.markdown(
