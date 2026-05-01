@@ -895,6 +895,14 @@ def main() -> None:
             help="Used by the Engines / Controls / Discrete / Browser / Compare tabs.",
         )
 
+        st.divider()
+        st.markdown(
+            "**Open source.** Code, preprocessing and the underlying FOIA data "
+            "are at [github.com/stevenlee090/NTSB_FOIA_MU5735]"
+            "(https://github.com/stevenlee090/NTSB_FOIA_MU5735). "
+            "Issues and PRs welcome."
+        )
+
     df_filt = df[(df["Time"] >= t_range[0]) & (df["Time"] <= t_range[1])].reset_index(drop=True)
 
     # --------------------------- Top KPI strip ----------------------------
