@@ -609,6 +609,207 @@ def replay_3d_chart(
 
 
 # ---------------------------------------------------------------------------
+# Forensic timeline
+# ---------------------------------------------------------------------------
+# Events are derived from manual inspection of TableResolution.csv and
+# ExactSample.csv. Timestamps are in seconds-relative-to-end-of-recording
+# (T-0 is the last FDR sample, treated as impact). FDR clock equivalents:
+#   -19.4s = 288958.59  -17.6s = 288960.31  -17.1s = 288960.43
+#   -17.1s = 288960.69  -17.0s = 288960.81  -16.7s = 288961.19
+#   -16.5s = 288961.44  -13.5s = 288964.50  -9.0s  = 288969.0
+#   -3.0s  = 288974.94  -0.5s  = 288977.4   -0.1s  = 288977.43
+FORENSIC_EVENTS: list[dict] = [
+    {
+        "rel": -19.35,
+        "label": "Both fuel cutoff switches → CUTOFF",
+        "category": "Cockpit input",
+        "detail": (
+            "Eng1 Cutoff SW and Eng2 Cutoff SW both transition from RUN to CUTOFF "
+            "in the same FDR frame. These are physical switches under each "
+            "throttle lever; moving them in normal cruise has no procedural reason."
+        ),
+    },
+    {
+        "rel": -17.6,
+        "label": "Control wheel slammed left (≈ -28°)",
+        "category": "Cockpit input",
+        "detail": (
+            "Control wheel jumps from neutral cruise (+0.35°) to -28° in a single "
+            "sample, then continues to -50°…-100° (full deflection) and is held "
+            "there for several seconds."
+        ),
+    },
+    {
+        "rel": -17.5,
+        "label": "AP-1 and AP-2 disconnect warnings",
+        "category": "Auto reaction",
+        "detail": (
+            "Both autopilot warning channels assert (Off → On). This is the "
+            "expected response when manual control input forces exceed the "
+            "autopilot override threshold."
+        ),
+    },
+    {
+        "rel": -17.3,
+        "label": "Eng-2 fuel flow collapses",
+        "category": "Result",
+        "detail": (
+            "FF2 drops from 2576 pph to 144 pph (~95% reduction) within ~0.3 s of "
+            "the cutoff switch operation. Throttle Resolver Angle (Eng2 TRA) "
+            "stays at cruise position 59.2° — i.e. the throttle lever did not "
+            "move; only the fuel valve closed."
+        ),
+    },
+    {
+        "rel": -17.2,
+        "label": "Autopilot disengages (CMD A → Not SELECTED)",
+        "category": "Auto reaction",
+        "detail": (
+            "AP Off transitions On → F/D Only. CMD A (master autopilot mode) "
+            "deselects. Aircraft is now under manual control."
+        ),
+    },
+    {
+        "rel": -16.8,
+        "label": "Eng-1 fuel flow collapses",
+        "category": "Result",
+        "detail": (
+            "FF1 drops from ~2600 pph to 304 pph. Eng1 TRA also stays at 59.6° "
+            "— same pattern: fuel valve closed, throttle position unchanged."
+        ),
+    },
+    {
+        "rel": -16.5,
+        "label": "Aircraft begins rolling left",
+        "category": "Result",
+        "detail": (
+            "Roll passes -6°, then -29°, -44°, -60° in successive samples. "
+            "Heading drifts from 102° toward 96° as the rolling aircraft yaws."
+        ),
+    },
+    {
+        "rel": -13.5,
+        "label": "Aircraft rolls past inverted (≤ -180°)",
+        "category": "Result",
+        "detail": (
+            "Roll reaches ±177° (essentially upside-down) ≈ 13 s before impact. "
+            "Pitch begins to drop — gravity is now pulling the nose 'down' "
+            "relative to the aircraft (i.e. toward earth)."
+        ),
+    },
+    {
+        "rel": -9.0,
+        "label": "Recovery attempt — column pulled aft",
+        "category": "Cockpit input",
+        "detail": (
+            "Control column moves to -6° to -8° (pulled aft for the first time), "
+            "elevator deflects to -10° to -11°. Roll briefly returns through "
+            "level (+115° → +60° → 0°). Too low / too steep / no thrust to "
+            "recover."
+        ),
+    },
+    {
+        "rel": -3.0,
+        "label": "Both engines effectively shut down",
+        "category": "Result",
+        "detail": (
+            "Eng1 and Eng2 N1 ≈ 26% (windmilling, sub-idle). FF1 → 0 pph. "
+            "Engines are providing no thrust."
+        ),
+    },
+    {
+        "rel": -0.6,
+        "label": "Air-Ground discrete reads 'Gnd'",
+        "category": "Impact",
+        "detail": (
+            "The weight-on-wheels / air-ground discrete (driven by gear strut "
+            "compression on the 737-NG) flips Air → Gnd. Effective ground impact."
+        ),
+    },
+    {
+        "rel": -0.1,
+        "label": "Engine fire indicators assert",
+        "category": "Impact",
+        "detail": (
+            "Eng1 Fire and Eng2 Fire both go NO FIRE → FIRE in the very last "
+            "samples. Vertical G spikes to +4.1 / -3.4. Aircraft is breaking up."
+        ),
+    },
+]
+
+_CAT_COLOR = {
+    "Cockpit input": "#d62728",
+    "Auto reaction": "#ff7f0e",
+    "Result": "#1f77b4",
+    "Impact": "#000000",
+}
+
+
+def forensic_timeline_chart() -> go.Figure:
+    """A horizontal timeline of the final ~20 seconds, annotated with each
+    state change. Categories are colour-coded.
+    """
+    fig = go.Figure()
+    # Background line representing the 20-second axis
+    fig.add_shape(
+        type="line",
+        x0=-20, x1=0.2,
+        y0=0, y1=0,
+        line=dict(color="#888", width=2),
+    )
+    for cat, color in _CAT_COLOR.items():
+        events = [e for e in FORENSIC_EVENTS if e["category"] == cat]
+        if not events:
+            continue
+        fig.add_scatter(
+            x=[e["rel"] for e in events],
+            y=[0] * len(events),
+            mode="markers",
+            marker=dict(size=14, color=color, line=dict(color="white", width=1.5)),
+            name=cat,
+            customdata=[[e["label"], e["detail"]] for e in events],
+            hovertemplate="<b>T%{x:+.2f}s</b><br>%{customdata[0]}<br><br>%{customdata[1]}<extra></extra>",
+        )
+
+    # Stagger labels above/below the line so they don't overlap
+    for i, e in enumerate(FORENSIC_EVENTS):
+        y_offset = 0.5 if i % 2 == 0 else -0.5
+        fig.add_annotation(
+            x=e["rel"],
+            y=y_offset,
+            text=f"<b>T{e['rel']:+.1f}s</b><br>{e['label']}",
+            showarrow=True,
+            arrowhead=2,
+            arrowsize=1,
+            arrowwidth=1,
+            arrowcolor="#666",
+            ax=0,
+            ay=-30 if y_offset > 0 else 30,
+            font=dict(size=10, color=_CAT_COLOR[e["category"]]),
+            align="center",
+            bgcolor="rgba(255,255,255,0.85)",
+            borderpad=2,
+        )
+
+    fig.update_layout(
+        title="Final 20 seconds — annotated timeline (T-0 = impact)",
+        height=500,
+        margin=dict(l=20, r=20, t=60, b=40),
+        xaxis=dict(
+            title="Seconds relative to impact",
+            range=[-20.5, 0.5],
+            tickmode="array",
+            tickvals=list(range(-20, 1, 2)),
+            zeroline=False,
+        ),
+        yaxis=dict(visible=False, range=[-1.5, 1.5]),
+        legend=dict(orientation="h", y=-0.05, x=0.5, xanchor="center"),
+        plot_bgcolor="rgba(245,245,245,0.5)",
+    )
+    return fig
+
+
+# ---------------------------------------------------------------------------
 # UI
 # ---------------------------------------------------------------------------
 def main() -> None:
@@ -692,6 +893,7 @@ def main() -> None:
     # ------------------------------- Tabs ---------------------------------
     (
         tab_story,
+        tab_what,
         tab_replay,
         tab_event,
         tab_engines,
@@ -703,6 +905,7 @@ def main() -> None:
     ) = st.tabs(
         [
             "Story",
+            "What happened?",
             "3D Replay",
             "Event zoom (last 30 s)",
             "Engines",
@@ -734,6 +937,189 @@ def main() -> None:
             """
         )
         st.plotly_chart(overview_chart(df, upset_t), use_container_width=True)
+
+    # ------------------------ "What happened?" tab ------------------------
+    with tab_what:
+        st.markdown(
+            """
+            ### What does the data tell us?
+
+            > **Caveat.** The cockpit voice recorder is **not** in this FOIA release.
+            > This analysis is built only from the FDR signals. The data shows what
+            > happened *mechanically* — the order of switch flips, control
+            > deflections and surface responses. It cannot say *who* was at the
+            > controls, *why*, or whether the crew was conscious. The official
+            > Chinese investigation (CAAC) has not published a final cause as of
+            > the FOIA's release; this is one independent reading.
+            """
+        )
+
+        st.subheader("The forensic timeline")
+        st.markdown(
+            """
+            Reconstructed by stepping through the high-rate (16 Hz) FDR samples
+            in the final 20 seconds. Each marker is a real, timestamped state
+            change in the recorded data — hover for the underlying signal
+            evidence.
+            """
+        )
+        st.plotly_chart(forensic_timeline_chart(), use_container_width=True)
+
+        st.subheader("The five anomalies")
+        st.markdown(
+            """
+            #### 1. Both fuel cutoff switches moved to CUTOFF — simultaneously
+            At **T-19.4 s** (FDR clock 288958.59), `Eng1 Cutoff SW` and
+            `Eng2 Cutoff SW` both transition `RUN → CUTOFF` in the same FDR
+            frame. These are two **physical switches**, one under each throttle
+            lever, with separate mechanical paths. There is no normal-procedure
+            reason to operate either of them in cruise; operating *both* at the
+            same instant has no benign explanation.
+
+            #### 2. Hard-over control wheel input — within ~2 seconds
+            At **T-17.6 s**, the control wheel deflects from neutral cruise
+            (≈ +0.35°) to **-28°** in a single sample, then continues to
+            **-50° to -100°** (full deflection) and is held there for several
+            seconds. The aileron surface responds proportionally.
+
+            #### 3. The autopilot disconnected as a *consequence*, not a cause
+            The autopilot was in `VNAV PATH` / `LNAV` mode through cruise.
+            `AP-1 Warn` and `AP-2 Warn` only assert **after** the wheel input
+            (T-17.5 s), and `CMD A` deselects at T-17.2 s. This is the
+            standard 737 behaviour when manual control forces exceed the
+            CWS override threshold — i.e. the autopilot was overridden, not
+            commanding the upset.
+
+            #### 4. The dive was caused by the *roll*, not by the elevator
+            Through the entire 16-second descent, `Elevator-L` stays in the
+            cruise band of -4° to -6°. Pitch goes from +2.5° to -36° entirely
+            because the aircraft rolled past inverted and gravity pulled the
+            nose toward earth. There is **no nose-down elevator command and no
+            stab-trim runaway signature**.
+
+            #### 5. No system warning preceded the upset
+            Hydraulic A and B pressures stayed at ≈ 3000 psi throughout. No
+            engine fire warning, no overspeed warning, no master-caution
+            transition, no flap/slat asymmetry. Vertical G stayed within
+            ~0 to 1.3 g during the dive (no sustained negative G that could
+            unport fuel pickups). Engine fire indicators only assert in the
+            **final 0.1 s**, consistent with impact, not an inflight fire.
+            """
+        )
+
+        st.subheader("Five hypotheses, scored against the evidence")
+        rows = [
+            {
+                "Scenario": "Deliberate cockpit input",
+                "Consistency": "Strong",
+                "What supports it": (
+                    "Dual cutoff switches require deliberate two-handed action on "
+                    "separate switches. Hard-over wheel input within 2 s. No "
+                    "preceding system fault. AP override pattern matches manual "
+                    "force. Roll-then-dive is exactly what someone deflecting a "
+                    "wheel hard-left in cruise would produce."
+                ),
+                "What contradicts it": (
+                    "The data alone cannot identify the actor or motive. CVR "
+                    "would be needed to distinguish a single deliberate actor "
+                    "from a struggle in the cockpit."
+                ),
+            },
+            {
+                "Scenario": "Pilot incapacitation / accidental input",
+                "Consistency": "Very weak",
+                "What supports it": (
+                    "A slumped body could push a wheel to one side."
+                ),
+                "What contradicts it": (
+                    "Cannot explain *both* fuel cutoff switches being moved to "
+                    "CUTOFF in the same frame — they are physically separated "
+                    "and require deliberate finger lifts to actuate. A "
+                    "collapsing body would also typically mash the column "
+                    "fore/aft, not the wheel."
+                ),
+            },
+            {
+                "Scenario": "Mechanical / electrical failure cascade",
+                "Consistency": "Very weak",
+                "What supports it": (
+                    "Some single faults have produced unexpected upsets in "
+                    "other accidents."
+                ),
+                "What contradicts it": (
+                    "The fuel cutoff switches and the wheel input share no "
+                    "electrical or hydraulic path. No master caution, no "
+                    "hydraulic anomaly, no engine fault prior to cutoff. No "
+                    "single failure mode on the 737-800 NG can produce this "
+                    "exact signature, and certainly not without lighting any "
+                    "warning."
+                ),
+            },
+            {
+                "Scenario": "Stab-trim / control-system runaway",
+                "Consistency": "Inconsistent",
+                "What supports it": (
+                    "On other types (e.g. MAX/MCAS), runaway trim has caused "
+                    "uncommanded pitch changes."
+                ),
+                "What contradicts it": (
+                    "The 737-800 has no MCAS. The elevator does not move "
+                    "during the dive — pitch follows from the roll. No "
+                    "trim-related signal anomalies."
+                ),
+            },
+            {
+                "Scenario": "Hijacking / unauthorised cockpit access",
+                "Consistency": "Cannot be excluded by data",
+                "What supports it": (
+                    "The data is consistent with a deliberate human actor; "
+                    "FDR cannot identify *who*."
+                ),
+                "What contradicts it": (
+                    "No public reporting of a security event on this flight; "
+                    "very rare in modern commercial aviation. Indistinguishable "
+                    "from #1 on FDR data alone — would need CVR / cabin / "
+                    "investigative evidence."
+                ),
+            },
+        ]
+        st.dataframe(
+            pd.DataFrame(rows),
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Scenario": st.column_config.Column(width="medium"),
+                "Consistency": st.column_config.Column(width="small"),
+                "What supports it": st.column_config.Column(width="large"),
+                "What contradicts it": st.column_config.Column(width="large"),
+            },
+        )
+
+        st.subheader("What this data cannot tell us")
+        st.markdown(
+            """
+            - **Who** was at the controls. The FDR records inputs, not the
+              identity of the person making them.
+            - **Voice / sounds in the cockpit.** The CVR is not in this FOIA
+              release. Any struggle, conversation, or alarm callout is invisible
+              to this dataset.
+            - **Motive.** Even if we are confident the inputs were deliberate,
+              the data is silent on *why*.
+            - **Whether the pilot or copilot was incapacitated** when the inputs
+              were made.
+            - **Absolute geographic position.** The FOIA data has no GPS lat/lon
+              channels — only barometric altitude, computed airspeed, ground
+              speed and heading.
+
+            ##### Public context
+
+            *In May 2022 the Wall Street Journal reported that US officials who
+            had reviewed the preliminary FDR data assessed that "inputs to the
+            controls pushed the plane into the fatal dive." The Civil Aviation
+            Administration of China has issued only brief preliminary updates
+            and has not publicly attributed cause as of this archive's release.*
+            """
+        )
 
     # --------------------------- 3D Replay tab ----------------------------
     with tab_replay:
